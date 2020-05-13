@@ -1,0 +1,51 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: airflow
+  name: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-postgres
+  template:
+    metadata:
+      namespace: airflow
+      labels:
+        app: airflow-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:12.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+          envFrom:
+          - secretRef:
+              name: postgres
+          - secretRef:
+              name: airflow-env
+          volumeMounts:
+            - mountPath: /var/lib/postgresql/data
+              name: postgres
+      volumes:
+        - name: postgres
+          hostPath:
+            path: /data/airflow/airflow_db
+            type: Directory
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: airflow
+  labels:
+    app: airflow-web
+spec:
+  type: NodePort
+  selector:
+    app: airflow-postgres
+  ports:
+    - port: 5432

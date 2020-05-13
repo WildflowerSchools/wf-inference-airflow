@@ -1,0 +1,64 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-scheduler
+  namespace: airflow
+  labels:
+    app: airflow-scheduler
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: airflow-scheduler
+  template:
+    metadata:
+      namespace: airflow
+      labels:
+        app: airflow-scheduler
+    spec:
+      securityContext:
+        fsGroup: 1000
+      serviceAccountName: airflow
+      restartPolicy: Always
+      containers:
+      - name: scheduler
+        image: wildflowerschools/wf-deep-docker:airflow-v13
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: webserver
+          containerPort: 8080
+        command:
+          - "bash"
+        args:
+          - "-cx"
+          - "bash /airflow/scripts/startup-airflow-scheduler.sh"
+        envFrom:
+          - secretRef:
+              name: airflow-env
+        env:
+        - name: AIRFLOW__KUBERNETES__KUBE_CLIENT_REQUEST_ARGS
+          value: '{"_request_timeout" : [50, 50]}'
+        - name: AIRFLOW_KUBE_NAMESPACE
+          value: airflow
+        volumeMounts:
+        - name: airflow-config
+          mountPath: /airflow/airflow.cfg
+          subPath: airflow.cfg
+        - name: airflow-logs
+          mountPath: /airflow/logs
+        - name: airflow-dags
+          mountPath: /airflow/dags
+      volumes:
+      - name: airflow-logs
+        hostPath:
+          path: /data/airflow/logs
+          type: Directory
+      - name: airflow-dags
+        hostPath:
+          path: /data/airflow/dags
+          type: Directory
+      - name: airflow-config
+        configMap:
+          name: airflow-config
