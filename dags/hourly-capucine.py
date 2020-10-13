@@ -13,12 +13,12 @@ from airflow.utils.helpers import chain
 from wftools.honeycomb import get_assignments, get_environment_id
 
 DATA_PROCESS_DIRECTORY = '/data/prepared'
-DURATION = '1d'
+DURATION = '1h'
 
 default_args = {
     'owner': 'root',
     'depends_on_past': False,
-    'start_date': "2020-03-10",
+    'start_date': "2020-01-01",
     'email': ['tech@wildflowerschools.org'],
     'email_on_failure': False,
     'email_on_retry': False,
@@ -26,18 +26,20 @@ default_args = {
     'retry_delay': timedelta(minutes=1),
 }
 
-dag = DAG('capucine-setup-v053', schedule_interval="@once", default_args=default_args, catchup=False)
+date_pattern = "{{ ts[:13] }}"
 
-alpha_image = "wildflowerschools/wf-deep-docker:alphapose-producer-v108"
+dag = DAG('capucine-setup-hourly-v0', schedule_interval="@once", default_args=default_args, catchup=False)
+
+alpha_image = "wildflowerschools/wf-deep-docker:alphapose-producer-v87"
 
 start = DummyOperator(
-    task_id='start',
+    task_id=f'start',
     dag=dag,
 )
 
 
 end = DummyOperator(
-    task_id='end',
+    task_id=f'end',
     dag=dag,
 )
 
@@ -75,7 +77,7 @@ timestamp_pattern = "{{ ts[:-3] + ts[-2:] }}"
 
 for i, assignment in enumerate(results):
     prepare = DockerOperator(
-            container_name=f"capucine-{assignment['assignment_id']}-prepare-task",
+            container_name=f"capucine-{assignment['assignment_id']}-{date_pattern}-prepare-task",
             task_id=f"capucine-{assignment['assignment_id']}-prepare-task",
             image="wildflowerschools/wf-deep-docker:video-prepare-tooling-v30",
             command=[
@@ -107,14 +109,12 @@ for i, assignment in enumerate(results):
     previous = prepare
     for x in range(1,7):
         alpha = DockerOperator(
-                container_name=f"capucine-{assignment['assignment_id']}-{x}-alphapose-task",
+                container_name=f"capucine-{assignment['assignment_id']}-{date_pattern}-{x}-alphapose-task",
                 task_id=f"capucine-{assignment['assignment_id']}-{x}-alphapose-task",
                 image=alpha_image,
                 command=[
-                    "inference",
-                    "--detector", "wfyolov4",
-                    "--pose-model", "wf_res152_256x192_yolov4",
-                    "--tracker-model", "jde_1088x608",
+                    "alphapose-runner",
+                    "--verbose",
                     "--environment_id",
                     environment_id,
                     "--assignment_id",
@@ -125,14 +125,12 @@ for i, assignment in enumerate(results):
                     DURATION,
                     "--slot",
                     str(x),
-                    "--verbose",
-                    "true",
                 ],
                 execution_timeout=timedelta(hours=8),
                 force_pull=False,
                 pool=f'gpu',
                 environment=alphapose_env,
-                volumes=["/data:/data", "/data/alphapose-training/data:/build/AlphaPose/data", "/data/alphapose-training/pretrained_models:/build/AlphaPose/pretrained_models"],
+                volumes=["/data:/data"],
                 dag=dag,
                 docker_url='unix://var/run/docker.sock',
                 network_mode='host',
@@ -142,15 +140,16 @@ for i, assignment in enumerate(results):
             )
         previous >> alpha
         previous = alpha
-        alpha = DummyOperator(
-            task_id=f"capucine-{assignment['assignment_id']}-{x}-alphapose-task",
-            dag=dag,
-        )
+        # alpha = DummyOperator(
+        #     task_id=f"capucine-{assignment['assignment_id']}-{x}-alphapose-task",
+        #     dag=dag,
+        # )
         uptask = DockerOperator(
-                container_name=f"capucine-{assignment['assignment_id']}-{x}-upload-task",
+                container_name=f"capucine-{assignment['assignment_id']}-{date_pattern}-{x}-upload-task",
                 task_id=f"capucine-{assignment['assignment_id']}-{x}-upload-task",
                 image=alpha_image,
                 command=[
+                    "producer",
                     "upload-poses",
                     environment_id,
                     assignment['assignment_id'],
@@ -158,8 +157,6 @@ for i, assignment in enumerate(results):
                     DURATION,
                     str(x),
                     "alphapose_coco18",
-                    "alphapose_yolov4_wf",
-                    "v0.2",
                 ],
                 execution_timeout=timedelta(hours=6),
                 force_pull=False,
@@ -167,7 +164,6 @@ for i, assignment in enumerate(results):
                 environment=upload_env,
                 volumes=["/data:/data"],
                 dag=dag,
-                entrypoint=["producer"],
                 docker_url='unix://var/run/docker.sock',
                 network_mode='host',
                 api_version='auto',

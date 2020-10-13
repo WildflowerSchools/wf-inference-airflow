@@ -73,3 +73,11 @@ services:
     - type: bind
       source: ./airflow.cfg
       target: /airflow/airflow.cfg
+  redis:
+    image: redis:alpine
+    restart: always
+    volumes:
+    - /data/redis:/data
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - 6379:6379
