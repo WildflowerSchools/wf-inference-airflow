@@ -13,12 +13,12 @@ from airflow.utils.helpers import chain
 from wftools.honeycomb import get_assignments, get_environment_id
 
 DATA_PROCESS_DIRECTORY = '/data/prepared'
-DURATION = '1d'
+DURATION = '2h'
 
 default_args = {
     'owner': 'root',
     'depends_on_past': False,
-    'start_date': "2020-03-10",
+    'start_date': "2021-01-07",
     'email': ['tech@wildflowerschools.org'],
     'email_on_failure': False,
     'email_on_retry': False,
@@ -27,10 +27,10 @@ default_args = {
 }
 
 
-VERSION = "v117"
+VERSION = "v119"
 SUB = "-00001"
 
-dag = DAG(f'capucine-setup-{VERSION}{SUB}', schedule_interval="@once", default_args=default_args, catchup=False)
+dag = DAG(f'greenbrier-setup-{VERSION}{SUB}', schedule_interval="@once", default_args=default_args, catchup=False)
 
 alpha_image = f"wildflowerschools/wf-deep-docker:alphapose-producer-{VERSION}"
 alpha_utils_image = f"wildflowerschools/wf-deep-docker:alphapose-producer-utils-{VERSION}"
@@ -47,7 +47,7 @@ end = DummyOperator(
 )
 
 
-environment_id = get_environment_id('capucine')
+environment_id = get_environment_id('greenbrier')
 assignments = get_assignments(environment_id)
 results = []
 for assignment, device_id in assignments:
@@ -68,7 +68,7 @@ alphapose_env = secrets.copy()
 alphapose_env.update({'MAX_ATTEMPTS': '100', 'ALPHA_POSE_POSEFLOW': 'false', 'ENV': 'production', 'DATA_PROCESS_DIRECTORY': DATA_PROCESS_DIRECTORY})
 
 upload_env = secrets.copy()
-upload_env.update({'DATA_PROCESS_DIRECTORY': DATA_PROCESS_DIRECTORY})
+upload_env.update({'DATA_PROCESS_DIRECTORY': DATA_PROCESS_DIRECTORY, 'MODEL_NAME': 'COCO-17'})
 
 preps = []
 poses = []
@@ -80,8 +80,8 @@ timestamp_pattern = "{{ ts[:-3] + ts[-2:] }}"
 
 for i, assignment in enumerate(results):
     prepare = DockerOperator(
-            container_name=f"capucine-{assignment['assignment_id']}-prepare-task",
-            task_id=f"capucine-{assignment['assignment_id']}-prepare-task",
+            container_name=f"greenbrier-{assignment['assignment_id']}-prepare-task",
+            task_id=f"greenbrier-{assignment['assignment_id']}-prepare-task",
             image="wildflowerschools/wf-deep-docker:video-prepare-tooling-v30",
             command=[
                 "python",
@@ -89,7 +89,7 @@ for i, assignment in enumerate(results):
                 "inference_helpers",
                 "prepare-assignment-videos",
                 "--environment_name",
-                "capucine",
+                "greenbrier",
                 "--start",
                 timestamp_pattern,
                 "--duration",
@@ -112,8 +112,8 @@ for i, assignment in enumerate(results):
     previous = prepare
     for x in range(1,7):
         alpha = DockerOperator(
-                container_name=f"capucine-{assignment['assignment_id']}-{x}-alphapose-task",
-                task_id=f"capucine-{assignment['assignment_id']}-{x}-alphapose-task",
+                container_name=f"greenbrier-{assignment['assignment_id']}-{x}-alphapose-task",
+                task_id=f"greenbrier-{assignment['assignment_id']}-{x}-alphapose-task",
                 image=alpha_image,
                 command=[
                     "inference",
@@ -125,7 +125,7 @@ for i, assignment in enumerate(results):
                     "--assignment_id",
                     assignment['assignment_id'],
                     "--start",
-                    "{{ ts[:-3] + ts[-2:] }}",
+                    timestamp_pattern,
                     "--dur",
                     DURATION,
                     "--slot",
@@ -152,23 +152,23 @@ for i, assignment in enumerate(results):
                 tty=True,
             )
         # alpha = DummyOperator(
-        #     task_id=f"capucine-{assignment['assignment_id']}-{x}-alphapose-task",
+        #     task_id=f"greenbrier-{assignment['assignment_id']}-{x}-alphapose-task",
         #     dag=dag,
         # )
         previous >> alpha
         previous = alpha
         uptask = DockerOperator(
-                container_name=f"capucine-{assignment['assignment_id']}-{x}-upload-task",
-                task_id=f"capucine-{assignment['assignment_id']}-{x}-upload-task",
+                container_name=f"greenbrier-{assignment['assignment_id']}-{x}-upload-task",
+                task_id=f"greenbrier-{assignment['assignment_id']}-{x}-upload-task",
                 image=alpha_utils_image,
                 command=[
                     "upload-poses",
                     environment_id,
                     assignment['assignment_id'],
-                    "{{ ts[:-3] + ts[-2:] }}",
+                    timestamp_pattern,
                     DURATION,
                     str(x),
-                    "alphapose_coco18",
+                    "alphapose_coco17",
                     "alphapose_yolov4_wf",
                     "v0.2",
                 ],
@@ -184,13 +184,13 @@ for i, assignment in enumerate(results):
                 auto_remove=True,
             )
         # uptask = DummyOperator(
-        #     task_id=f"capucine-{assignment['assignment_id']}-{x}-upload-task",
+        #     task_id=f"greenbrier-{assignment['assignment_id']}-{x}-upload-task",
         #     dag=dag,
         # )
         previous >> uptask
         previous = uptask
     completed = DummyOperator(
-        task_id=f"capucine-{assignment['assignment_id']}-complete",
+        task_id=f"greenbrier-{assignment['assignment_id']}-complete",
         dag=dag,
     )
     previous >> completed
